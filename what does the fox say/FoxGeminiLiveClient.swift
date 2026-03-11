@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import QuartzCore
 
+/// Handles the realtime websocket, microphone capture, playback audio, and transcript callbacks for live practice.
 final class GeminiLiveClient: NSObject, ObservableObject {
     struct Configuration {
         var webSocketURL: URL
@@ -121,6 +122,7 @@ final class GeminiLiveClient: NSObject, ObservableObject {
         setupPlaybackEngine()
     }
 
+    /// Opens the realtime websocket and prepares the client to start streaming microphone audio.
     func connect(configuration: Configuration) {
         guard socketTask == nil else { return }
         debugLog(.realtime, "connect \(redactToken(in: configuration.webSocketURL.absoluteString))")
@@ -143,12 +145,14 @@ final class GeminiLiveClient: NSObject, ObservableObject {
         socketTask?.resume()
     }
 
+    /// Fully disconnects the realtime session and tears down local audio capture.
     func disconnect() {
         debugLog(.realtime, "disconnect")
         stopMicrophone()
         closeSocket()
     }
 
+    /// Ends the current speaking turn and closes the websocket shortly afterward.
     func endSession() {
         debugLog(.realtime, "end session")
         stopMicrophone()
@@ -158,6 +162,7 @@ final class GeminiLiveClient: NSObject, ObservableObject {
         }
     }
 
+    /// Configures AVAudioSession and starts streaming microphone audio into the realtime socket.
     func startMicrophone() {
         debugLog(.audio, "start microphone")
         resetVAD()
@@ -227,6 +232,7 @@ final class GeminiLiveClient: NSObject, ObservableObject {
         }
     }
 
+    /// Stops live capture and finalizes any locally recorded conversation audio artifacts.
     func stopMicrophone() {
         debugLog(.audio, "stop microphone")
         cancelPendingUplinkResume()
@@ -270,12 +276,14 @@ final class GeminiLiveClient: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
+    /// Sends a text event over the websocket for debugging or non-audio experimentation.
     func sendText(_ text: String) {
         guard let socketTask else { return }
         let payload = URLSessionWebSocketTask.Message.string(text)
         socketTask.send(payload) { _ in }
     }
 
+    /// Interrupts current playback and returns the client to listening mode.
     func interrupt() {
         onResponseEnd?()
     }

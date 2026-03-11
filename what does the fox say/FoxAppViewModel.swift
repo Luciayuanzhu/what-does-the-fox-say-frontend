@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 
 @MainActor
+/// Coordinates app state, realtime speaking, history, onboarding, and settings updates for the main UI.
 final class FoxAppViewModel: ObservableObject {
     private enum ReviewPromptConfig {
         static let mainPageEntryThreshold = 3
@@ -59,6 +60,7 @@ final class FoxAppViewModel: ObservableObject {
         video.playLoop(.foxidle)
     }
 
+    /// Starts bootstrap work once when the root interface first appears.
     func onAppear() {
         guard !didAppear else { return }
         didAppear = true
@@ -68,6 +70,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Mirrors scene activity so networking, polling, and active sessions react to backgrounding correctly.
     func setAppActive(_ active: Bool) {
         if lastAppActiveState != active {
             debugLog(.lifecycle, active ? "scene became active" : "scene moved away from active")
@@ -92,6 +95,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Persists the initial onboarding choices and synchronizes them to the backend when available.
     func completeOnboarding(nativeLanguage: PracticeLanguage, targetLanguage: PracticeLanguage, persona: FoxPersona) {
         profile = UserProfile(nativeLanguage: nativeLanguage, targetLanguage: targetLanguage, persona: persona)
         persistLocalProfile()
@@ -119,6 +123,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Applies settings edits locally first, then pushes them to the backend profile.
     func updateProfile(_ updated: UserProfile) {
         profile = updated
         persistLocalProfile()
@@ -145,6 +150,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Maps the hidden top, middle, and bottom tap zones to the matching one-shot animation clips.
     func handleTap(location: CGPoint, in size: CGSize) {
         guard !micEnabled, !isSpeaking else { return }
 
@@ -163,11 +169,13 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Plays an explicit top-right emotion clip when the session is idle.
     func playEmotion(_ asset: VideoAsset) {
         guard !micEnabled, !isSpeaking else { return }
         playOneShot(asset)
     }
 
+    /// Returns the experience to the default foxidle loop or ends an active voice session first.
     func resetToIdle() {
         if micEnabled {
             endVoiceSession()
@@ -179,16 +187,19 @@ final class FoxAppViewModel: ObservableObject {
         video.playLoop(.foxidle)
     }
 
+    /// Toggles the live speaking session on and off from the bottom microphone control.
     func toggleMic() {
         micEnabled ? endVoiceSession() : startVoiceSession()
     }
 
+    /// Convenience wrapper used by UI surfaces that want to start a session without branching on mic state.
     func startListening() {
         if !micEnabled {
             startVoiceSession()
         }
     }
 
+    /// Reloads the history list shown in the glass card history sheet.
     func refreshHistory() async {
         guard api.hasConfiguredBaseURL else {
             historySessions = []
@@ -206,6 +217,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Fetches and logs the full detail payload for a selected session card.
     func fetchDetail(session: PracticeSessionSummary) async throws -> PracticeSessionDetail {
         guard await ensureAuthenticatedIfNeeded(reason: "history_detail") else {
             throw URLError(.userAuthenticationRequired)
@@ -218,6 +230,7 @@ final class FoxAppViewModel: ObservableObject {
         return detail
     }
 
+    /// Clears unread state for a viewed session version and refreshes home red-dot state.
     func markSessionRead(_ detail: PracticeSessionDetail) async {
         guard detail.isUnread else { return }
         guard await ensureAuthenticatedIfNeeded(reason: "history_mark_read") else { return }
@@ -232,6 +245,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Records that a detail page was opened so history interactions can be traced in logs.
     func didViewSessionDetail(_ detail: PracticeSessionDetail) {
         debugLog(
             .history,
@@ -239,6 +253,7 @@ final class FoxAppViewModel: ObservableObject {
         )
     }
 
+    /// Counts successful main-screen entries for onboarding and custom review-prompt logic.
     func recordMainPageEntryIfNeeded() {
         guard !showOnboarding, isAppActive else { return }
         guard !didRecordMainPageEntryThisActiveCycle else { return }
@@ -259,11 +274,13 @@ final class FoxAppViewModel: ObservableObject {
         debugLog(.ui, "review prompt requested mainPageEntries=\(entryCount)")
     }
 
+    /// Persists that the custom in-app rate prompt has already been displayed.
     func markRatePromptShown() {
         UserDefaults.standard.set(true, forKey: FoxStorageKeys.reviewPromptShown)
         debugLog(.ui, "review prompt marked shown")
     }
 
+    /// Requests another backend processing attempt for a failed history item.
     func retrySession(_ session: PracticeSessionSummary) async {
         guard await ensureAuthenticatedIfNeeded(reason: "history_retry") else { return }
         do {
@@ -280,6 +297,7 @@ final class FoxAppViewModel: ObservableObject {
         }
     }
 
+    /// Deletes a history item and refreshes the list afterward.
     func deleteSession(_ session: PracticeSessionSummary) async {
         guard await ensureAuthenticatedIfNeeded(reason: "history_delete") else { return }
         do {

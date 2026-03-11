@@ -1,7 +1,9 @@
 import Foundation
 import Security
 
+/// Wraps the minimal Keychain calls used to persist device-scoped identifiers across reinstalls.
 enum KeychainHelper {
+    /// Reads a single generic-password entry from the Keychain.
     static func read(service: String, account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -17,6 +19,7 @@ enum KeychainHelper {
         return item as? Data
     }
 
+    /// Replaces a generic-password entry with new data for the same service and account pair.
     static func save(_ data: Data, service: String, account: String) {
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -33,6 +36,7 @@ enum KeychainHelper {
     }
 }
 
+/// Generates and persists the anonymous device identifier used to bind local installs to backend history.
 final class DeviceIdManager {
     static let shared = DeviceIdManager()
 
@@ -43,6 +47,7 @@ final class DeviceIdManager {
 
     private init() {}
 
+    /// Returns the stored device ID, migrates the legacy value if needed, or creates a new UUID.
     func loadOrCreateDeviceId() -> String {
         if let data = KeychainHelper.read(service: service, account: account),
            let value = String(data: data, encoding: .utf8),

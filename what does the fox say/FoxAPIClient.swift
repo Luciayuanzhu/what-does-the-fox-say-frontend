@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 
+/// Centralizes all HTTP and websocket endpoint configuration for the iOS client.
 final class FoxAPIClient {
     static let shared = FoxAPIClient()
 
@@ -81,10 +82,12 @@ final class FoxAPIClient {
 
     var hasConfiguredBaseURL: Bool { FoxAPIConfig.hasConfiguredBaseURL }
 
+    /// Returns the currently persisted bearer token, if the anonymous auth flow has completed.
     func currentToken() -> String? {
         loadToken()
     }
 
+    /// Exchanges the locally stored device identifier for an anonymous backend user and bearer token.
     func authenticateAnonymous(deviceId: String) async throws -> AuthResponse {
         struct Payload: Encodable {
             let deviceId: String
@@ -125,6 +128,7 @@ final class FoxAPIClient {
         return response
     }
 
+    /// Registers the current device metadata so the backend can keep the device-to-user mapping stable.
     func registerDevice(deviceId: String) async throws -> DeviceResponse {
         struct Payload: Encodable {
             let deviceId: String
@@ -157,6 +161,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Loads the persisted practice profile that drives language pair and fox persona selection.
     func fetchProfile() async throws -> UserProfile {
         let response: UserProfileResponse = try await request(
             path: "/v1/profile",
@@ -176,6 +181,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Persists language and persona changes for future speaking sessions.
     func updateProfile(_ profile: UserProfile) async throws -> UserProfile {
         struct Payload: Encodable {
             let nativeLanguage: PracticeLanguage
@@ -205,6 +211,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Creates a new practice session before realtime audio begins streaming.
     func createPracticeSession(profile: UserProfile, deviceId: String) async throws -> PracticeSessionCreateResponse {
         struct Payload: Encodable {
             let deviceId: String
@@ -227,6 +234,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Uploads the recorded audio fallback file used for archival or STT recovery on the backend.
     func uploadSessionAudio(sessionId: String, fileURL: URL, durationSec: Int) async throws -> String? {
         let boundary = "Boundary-\(UUID().uuidString)"
         let fileData = try Data(contentsOf: fileURL)
@@ -274,6 +282,7 @@ final class FoxAPIClient {
         return nil
     }
 
+    /// Finalizes a practice session after audio capture ends and hands transcript/audio metadata to the backend.
     func finalizeSession(sessionId: String, transcript: [TranscriptSegment], durationSec: Int?, audioURL: String? = nil) async throws -> PracticeSessionCreateResponse {
         struct Payload: Encodable {
             let transcriptFullJson: [TranscriptSegment]?
@@ -295,6 +304,7 @@ final class FoxAPIClient {
         return response
     }
 
+    /// Fetches the lightweight history list used to render the glass session cards in History.
     func listPracticeSessions() async throws -> [PracticeSessionSummary] {
         let path = "/v1/practice-sessions"
         let url = makeURL(path: path)
@@ -336,6 +346,7 @@ final class FoxAPIClient {
         return items
     }
 
+    /// Fetches the full transcript, summary, and feedback payload for a single saved session.
     func getPracticeSession(session: PracticeSessionSummary) async throws -> PracticeSessionDetail {
         let path = "/v1/practice-sessions/\(session.id)"
         let url = makeURL(path: path)
@@ -399,6 +410,7 @@ final class FoxAPIClient {
         }
     }
 
+    /// Marks a session version as read so NEW badges and red-dot state can be cleared.
     func markSessionRead(sessionId: String, version: Int) async throws {
         struct Payload: Encodable {
             let version: Int
@@ -413,6 +425,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Requests a server-side retry for a failed or incomplete analysis run.
     func retryPracticeSession(sessionId: String) async throws -> PracticeSessionCreateResponse {
         try await request(
             path: "/v1/practice-sessions/\(sessionId)/retry",
@@ -423,6 +436,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Permanently deletes a saved practice session from the user's history.
     func deletePracticeSession(sessionId: String) async throws {
         try await requestNoContent(
             path: "/v1/practice-sessions/\(sessionId)",
@@ -433,6 +447,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Returns the unread and processing counters that drive red-dot state on the home screen.
     func getHistorySyncStatus() async throws -> HistorySyncStatus {
         let response: SyncStatusResponse = try await request(
             path: "/v1/history/sync-status",
@@ -453,6 +468,7 @@ final class FoxAPIClient {
         )
     }
 
+    /// Builds the realtime websocket URL used for the live Gemini-compatible audio session.
     func realtimeWebSocketURL(sessionId: String) -> URL? {
         guard let token = currentToken() else { return nil }
         guard var components = URLComponents(url: makeURL(path: FoxAPIConfig.realtimePath), resolvingAgainstBaseURL: false) else {
@@ -466,6 +482,7 @@ final class FoxAPIClient {
         return components.url
     }
 
+    /// Builds the history push websocket URL used for unread and processing updates.
     func historyWebSocketURL() -> URL? {
         guard let token = currentToken() else { return nil }
         guard var components = URLComponents(url: makeURL(path: FoxAPIConfig.historyPath), resolvingAgainstBaseURL: false) else {

@@ -1,5 +1,6 @@
 import Foundation
 
+/// Maintains the lightweight history websocket that pushes unread and status changes to the client.
 final class FoxHistoryPushClient: NSObject {
     var onEvent: ((HistoryPushEvent) -> Void)?
     var onConnectionChange: ((Bool) -> Void)?
@@ -9,6 +10,7 @@ final class FoxHistoryPushClient: NSObject {
         URLSession(configuration: .default, delegate: self, delegateQueue: .main)
     }()
 
+    /// Opens the history push socket and starts the recursive receive loop.
     func connect(url: URL, authToken: String?) {
         guard socketTask == nil else { return }
         _ = authToken
@@ -18,6 +20,7 @@ final class FoxHistoryPushClient: NSObject {
         receiveNext()
     }
 
+    /// Closes the history push socket and notifies listeners that the connection is offline.
     func disconnect() {
         debugLog(.history, "push socket disconnect")
         socketTask?.cancel(with: .goingAway, reason: nil)
@@ -25,6 +28,7 @@ final class FoxHistoryPushClient: NSObject {
         onConnectionChange?(false)
     }
 
+    /// Receives the next websocket message and converts it into a strongly typed history event.
     private func receiveNext() {
         socketTask?.receive { [weak self] result in
             guard let self else { return }
@@ -50,6 +54,7 @@ final class FoxHistoryPushClient: NSObject {
         }
     }
 
+    /// Decodes the compact server event payload used by the history push channel.
     private func decodeEvent(data: Data) -> HistoryPushEvent? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil

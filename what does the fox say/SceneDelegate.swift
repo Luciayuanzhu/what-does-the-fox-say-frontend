@@ -8,6 +8,7 @@
 import UIKit
 import SwiftUI
 
+/// Hosts the SwiftUI application shell inside the UIKit scene lifecycle.
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?

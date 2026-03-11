@@ -8,8 +8,10 @@
 import UIKit
 
 @main
+/// Boots the application, registers Settings.bundle defaults, and persists the first-launch timestamp.
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
+    /// Initializes process-wide preferences before any scene UI is attached.
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         registerSettingsDefaults()
         storeInitialLaunchIfNeeded()
@@ -30,6 +32,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Use this method to release any resources that were specific to the discarded scenes, as they will not return.
     }
 
+    /// Reads the generated Settings.bundle plist and registers its default values into UserDefaults.
     private func registerSettingsDefaults() {
         guard let settingsURL = Bundle.main.url(forResource: "Root", withExtension: "plist", subdirectory: "Settings.bundle"),
               let data = try? Data(contentsOf: settingsURL),
@@ -49,6 +52,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         debugLog(.lifecycle, "settings defaults registered count=\(defaults.count)")
     }
 
+    /// Stores the first launch date once and mirrors a human-readable string for Settings.bundle display.
     private func storeInitialLaunchIfNeeded() {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: FoxStorageKeys.initialLaunch) == nil {

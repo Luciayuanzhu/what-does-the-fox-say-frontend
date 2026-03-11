@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 
 @MainActor
+/// Owns the dual-player video pipeline that drives idle loops, one-shot reactions, and speaking playback.
 final class VideoPlaybackController: ObservableObject {
     let primaryPlayer: AVQueuePlayer
     let secondaryPlayer: AVQueuePlayer
@@ -33,6 +34,7 @@ final class VideoPlaybackController: ObservableObject {
         configure(player: secondaryPlayer)
     }
 
+    /// Starts or resumes a looping asset, reusing the active loop only when playback is already stable.
     func playLoop(_ asset: VideoAsset) {
         debugLog("video playLoop \(asset.rawValue)")
         let url = asset.url
@@ -71,6 +73,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Plays a one-shot clip without scheduling a follow-up loop.
     func playOnce(_ asset: VideoAsset, completion: (() -> Void)? = nil) {
         debugLog("video playOnce \(asset.rawValue)")
         currentLoopURL = nil
@@ -102,6 +105,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Plays a one-shot clip and then hands control back to the requested looping asset.
     func playOnceThenLoop(_ once: VideoAsset, loop: VideoAsset, onLoopStart: (() -> Void)? = nil) {
         debugLog("video playOnceThenLoop \(once.rawValue) -> \(loop.rawValue)")
         let onceURL = once.url
@@ -143,6 +147,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Queues a short sequence of clips for cases where several animations must play back-to-back.
     func playSequence(_ assets: [VideoAsset], completion: (() -> Void)? = nil) {
         guard !assets.isEmpty else { return }
         debugLog("video playSequence \(assets.map { $0.rawValue }.joined(separator: ","))")
@@ -177,6 +182,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Pauses both queue players without changing the currently requested asset state.
     func stop() {
         debugLog("video stop")
         primaryPlayer.pause()
@@ -207,6 +213,7 @@ final class VideoPlaybackController: ObservableObject {
         shouldAnimateTransition ? inactivePlayer : activePlayer
     }
 
+    /// Promotes one queue player to the visible layer and optionally crossfades away from the old one.
     private func activatePlayer(_ player: AVQueuePlayer, animated: Bool, duration: Double = 0.16) {
         let isPrimary = player === primaryPlayer
         let oldPlayer = activePlayer
@@ -232,6 +239,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Clears the previously visible player after the current transition has finished.
     private func scheduleCleanup(for player: AVQueuePlayer, delay: Double = 0.22) {
         cleanupTask?.cancel()
         cleanupTask = Task { [weak self] in
@@ -242,6 +250,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Resets a queue player so it can be reused for another loop or one-shot clip.
     private func clearPlayer(_ player: AVQueuePlayer) {
         if loopBoundaryObservedPlayer === player {
             clearLoopBoundaryObserver()
@@ -251,6 +260,7 @@ final class VideoPlaybackController: ObservableObject {
         clearLooper(for: player)
     }
 
+    /// Installs an AVPlayerLooper for the supplied asset and applies speaking trims when needed.
     private func setLooper(for player: AVQueuePlayer, item: AVPlayerItem, asset: VideoAsset) async {
         clearLooper(for: player)
         let looper: AVPlayerLooper
@@ -266,6 +276,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Returns a trimmed time range for assets whose file boundaries need loop cleanup.
     private func loopTimeRange(for asset: VideoAsset) async -> CMTimeRange? {
         // foxspeaking has a visible seam at file boundaries; trim a few boundary frames.
         guard asset == .foxspeaking else { return nil }
@@ -289,6 +300,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Waits until the active AVPlayerItem is ready before starting playback or transitions.
     private func startWhenReady(player: AVQueuePlayer, onReady: @escaping () -> Void) {
         guard let item = player.currentItem else {
             onReady()
@@ -310,6 +322,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Tears down playback observers that should not survive between clip changes.
     private func clearObservers() {
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -319,6 +332,7 @@ final class VideoPlaybackController: ObservableObject {
         clearLoopBoundaryObserver()
     }
 
+    /// Removes the speaking-loop boundary observer and cancels any pending boundary handoff task.
     private func clearLoopBoundaryObserver() {
         loopBoundarySwitchTask?.cancel()
         loopBoundarySwitchTask = nil
@@ -329,6 +343,7 @@ final class VideoPlaybackController: ObservableObject {
         loopBoundaryObservedPlayer = nil
     }
 
+    /// Starts the speaking loop path that prewarms the next iteration before the boundary seam.
     private func playSeamlessLoop(_ asset: VideoAsset) {
         let target = targetPlayerForNewPlayback()
         clearPlayer(target)
@@ -352,6 +367,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Seeks a player to the loop start and prerolls it so the visual handoff can happen cleanly.
     private func seekAndPrepare(player: AVQueuePlayer, loopRange: CMTimeRange?, completion: @escaping () -> Void) {
         let start = loopRange?.start ?? .zero
         player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
@@ -361,6 +377,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Installs the observer that prepares the next speaking-loop iteration before the current pass ends.
     private func installLoopBoundaryObserver(for player: AVQueuePlayer, asset: VideoAsset, loopRange: CMTimeRange?) {
         clearLoopBoundaryObserver()
         guard asset == .foxspeaking else { return }
@@ -386,6 +403,7 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
+    /// Prewarms the next speaking-loop player and swaps to it at the seam boundary.
     private func handleLoopBoundaryReached(from player: AVQueuePlayer, asset: VideoAsset, loopRange: CMTimeRange?) {
         guard currentLoopURL == asset.url else { return }
         guard player === activePlayer else { return }
