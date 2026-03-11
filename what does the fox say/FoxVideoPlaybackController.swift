@@ -14,9 +14,17 @@ final class VideoPlaybackController: ObservableObject {
     private var secondaryLooper: AVPlayerLooper?
     private var endObserver: NSObjectProtocol?
     private var readinessObservation: NSKeyValueObservation?
+    private var loopBoundaryObserver: Any?
+    private weak var loopBoundaryObservedPlayer: AVPlayer?
+    private var loopBoundarySwitchTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
     private var currentLoopURL: URL?
+    private var requestedLoopAsset: VideoAsset?
+    private var activeLoopAsset: VideoAsset?
+    private var isTransitioningLoop = false
     private var activeIsPrimary: Bool = true
+    private let speakingLoopPrewarmLeadTime = 0.08
+    private let loopTransitionDuration = 0.06
 
     init() {
         primaryPlayer = AVQueuePlayer()
@@ -28,11 +36,23 @@ final class VideoPlaybackController: ObservableObject {
     func playLoop(_ asset: VideoAsset) {
         debugLog("video playLoop \(asset.rawValue)")
         let url = asset.url
-        if currentLoopURL == url, activePlayer.timeControlStatus != .paused {
+        let isAlreadyRequested = requestedLoopAsset == asset
+        let isAlreadyActive =
+            activeLoopAsset == asset &&
+            activePlayer.currentItem != nil &&
+            activePlayer.timeControlStatus != .paused
+        if isAlreadyRequested && (isTransitioningLoop || isAlreadyActive) {
             return
         }
+        requestedLoopAsset = asset
         currentLoopURL = url
+        isTransitioningLoop = true
         clearObservers()
+
+        if asset == .foxspeaking {
+            playSeamlessLoop(asset)
+            return
+        }
 
         let target = targetPlayerForNewPlayback()
         clearPlayer(target)
@@ -43,7 +63,9 @@ final class VideoPlaybackController: ObservableObject {
             self.startWhenReady(player: target) { [weak self] in
                 guard let self else { return }
                 target.play()
-                self.activatePlayer(target, animated: false)
+                self.activatePlayer(target, animated: self.shouldAnimateTransition, duration: self.loopTransitionDuration)
+                self.activeLoopAsset = asset
+                self.isTransitioningLoop = false
             }
         }
     }
@@ -51,6 +73,9 @@ final class VideoPlaybackController: ObservableObject {
     func playOnce(_ asset: VideoAsset, completion: (() -> Void)? = nil) {
         debugLog("video playOnce \(asset.rawValue)")
         currentLoopURL = nil
+        requestedLoopAsset = nil
+        activeLoopAsset = nil
+        isTransitioningLoop = false
         clearObservers()
 
         let target = targetPlayerForNewPlayback()
@@ -87,24 +112,25 @@ final class VideoPlaybackController: ObservableObject {
         }
 
         currentLoopURL = loopURL
+        requestedLoopAsset = loop
+        activeLoopAsset = nil
+        isTransitioningLoop = true
         clearObservers()
 
         let target = targetPlayerForNewPlayback()
         clearPlayer(target)
 
         let onceItem = AVPlayerItem(url: onceURL)
-        let loopItem = AVPlayerItem(url: loopURL)
         target.insert(onceItem, after: nil)
-        target.insert(loopItem, after: onceItem)
 
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: onceItem,
             queue: .main
-        ) { [weak self] _ in
+            ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.setLooper(for: target, item: loopItem, asset: loop)
+                self.playLoop(loop)
                 onLoopStart?()
             }
         }
@@ -120,6 +146,9 @@ final class VideoPlaybackController: ObservableObject {
         guard !assets.isEmpty else { return }
         debugLog("video playSequence \(assets.map { $0.rawValue }.joined(separator: ","))")
         currentLoopURL = nil
+        requestedLoopAsset = nil
+        activeLoopAsset = nil
+        isTransitioningLoop = false
         clearObservers()
 
         let target = targetPlayerForNewPlayback()
@@ -151,6 +180,7 @@ final class VideoPlaybackController: ObservableObject {
         debugLog("video stop")
         primaryPlayer.pause()
         secondaryPlayer.pause()
+        isTransitioningLoop = false
     }
 
     private func configure(player: AVQueuePlayer) {
@@ -176,7 +206,7 @@ final class VideoPlaybackController: ObservableObject {
         shouldAnimateTransition ? inactivePlayer : activePlayer
     }
 
-    private func activatePlayer(_ player: AVQueuePlayer, animated: Bool) {
+    private func activatePlayer(_ player: AVQueuePlayer, animated: Bool, duration: Double = 0.16) {
         let isPrimary = player === primaryPlayer
         let oldPlayer = activePlayer
         activeIsPrimary = isPrimary
@@ -187,11 +217,11 @@ final class VideoPlaybackController: ObservableObject {
         }
 
         if animated {
-            withAnimation(.easeInOut(duration: 0.16)) {
+            withAnimation(.easeInOut(duration: duration)) {
                 update()
             }
             if oldPlayer !== player {
-                scheduleCleanup(for: oldPlayer)
+                scheduleCleanup(for: oldPlayer, delay: duration + 0.06)
             }
         } else {
             update()
@@ -201,10 +231,10 @@ final class VideoPlaybackController: ObservableObject {
         }
     }
 
-    private func scheduleCleanup(for player: AVQueuePlayer) {
+    private func scheduleCleanup(for player: AVQueuePlayer, delay: Double = 0.22) {
         cleanupTask?.cancel()
         cleanupTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             await MainActor.run {
                 self?.clearPlayer(player)
             }
@@ -212,6 +242,9 @@ final class VideoPlaybackController: ObservableObject {
     }
 
     private func clearPlayer(_ player: AVQueuePlayer) {
+        if loopBoundaryObservedPlayer === player {
+            clearLoopBoundaryObserver()
+        }
         player.pause()
         player.removeAllItems()
         clearLooper(for: player)
@@ -282,5 +315,106 @@ final class VideoPlaybackController: ObservableObject {
             self.endObserver = nil
         }
         readinessObservation = nil
+        clearLoopBoundaryObserver()
+    }
+
+    private func clearLoopBoundaryObserver() {
+        loopBoundarySwitchTask?.cancel()
+        loopBoundarySwitchTask = nil
+        if let observer = loopBoundaryObserver, let player = loopBoundaryObservedPlayer {
+            player.removeTimeObserver(observer)
+        }
+        loopBoundaryObserver = nil
+        loopBoundaryObservedPlayer = nil
+    }
+
+    private func playSeamlessLoop(_ asset: VideoAsset) {
+        let target = targetPlayerForNewPlayback()
+        clearPlayer(target)
+        let item = AVPlayerItem(url: asset.url)
+        target.insert(item, after: nil)
+
+        Task { [weak self] in
+            guard let self else { return }
+            let loopRange = await self.loopTimeRange(for: asset)
+            self.startWhenReady(player: target) { [weak self] in
+                guard let self else { return }
+                self.seekAndPrepare(player: target, loopRange: loopRange) { [weak self] in
+                    guard let self else { return }
+                    target.play()
+                    self.activatePlayer(target, animated: self.shouldAnimateTransition)
+                    self.activeLoopAsset = asset
+                    self.isTransitioningLoop = false
+                    self.installLoopBoundaryObserver(for: target, asset: asset, loopRange: loopRange)
+                }
+            }
+        }
+    }
+
+    private func seekAndPrepare(player: AVQueuePlayer, loopRange: CMTimeRange?, completion: @escaping () -> Void) {
+        let start = loopRange?.start ?? .zero
+        player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+            player.pause()
+            player.preroll(atRate: 1.0) { _ in }
+            completion()
+        }
+    }
+
+    private func installLoopBoundaryObserver(for player: AVQueuePlayer, asset: VideoAsset, loopRange: CMTimeRange?) {
+        clearLoopBoundaryObserver()
+        guard asset == .foxspeaking else { return }
+
+        let duration = loopRange?.duration ?? player.currentItem?.duration ?? .zero
+        let start = loopRange?.start ?? .zero
+        guard duration.isNumeric && duration.seconds > speakingLoopPrewarmLeadTime else { return }
+
+        let prewarmLead = CMTime(seconds: speakingLoopPrewarmLeadTime, preferredTimescale: 600)
+        let boundaryTime = start + duration - prewarmLead
+        guard boundaryTime > start else { return }
+
+        loopBoundaryObservedPlayer = player
+        loopBoundaryObserver = player.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: boundaryTime)],
+            queue: .main
+        ) { [weak self, weak player] in
+            guard let self, let player else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.handleLoopBoundaryReached(from: player, asset: asset, loopRange: loopRange)
+            }
+        }
+    }
+
+    private func handleLoopBoundaryReached(from player: AVQueuePlayer, asset: VideoAsset, loopRange: CMTimeRange?) {
+        guard currentLoopURL == asset.url else { return }
+        guard player === activePlayer else { return }
+        isTransitioningLoop = true
+
+        let target = inactivePlayer
+        clearPlayer(target)
+        let item = AVPlayerItem(url: asset.url)
+        target.insert(item, after: nil)
+
+        startWhenReady(player: target) { [weak self] in
+            guard let self else { return }
+            self.seekAndPrepare(player: target, loopRange: loopRange) { [weak self] in
+                guard let self else { return }
+                debugLog("video seamless speaking loop prewarm=\(self.speakingLoopPrewarmLeadTime)s")
+                let prewarmLeadTime = self.speakingLoopPrewarmLeadTime
+                self.loopBoundarySwitchTask?.cancel()
+                self.loopBoundarySwitchTask = Task { [weak self, weak target, weak player] in
+                    try? await Task.sleep(nanoseconds: UInt64(prewarmLeadTime * 1_000_000_000))
+                    await MainActor.run {
+                        guard let self, let target, let player else { return }
+                        guard self.currentLoopURL == asset.url, player === self.activePlayer else { return }
+                        target.play()
+                        self.activatePlayer(target, animated: false)
+                        self.activeLoopAsset = asset
+                        self.isTransitioningLoop = false
+                        self.installLoopBoundaryObserver(for: target, asset: asset, loopRange: loopRange)
+                    }
+                }
+            }
+        }
     }
 }

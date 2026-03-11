@@ -183,12 +183,12 @@ private struct HistoryRow: View {
 
     @ViewBuilder
     private var statusView: some View {
-        if session.status == .processing {
+        if session.isUnread {
+            statusBadge("NEW", tint: FoxTheme.accent)
+        } else if session.status == .processing {
             statusBadge(session.processingStageLabel ?? "Processing", tint: .orange)
         } else if session.status == .failed {
             statusBadge("Failed", tint: FoxTheme.historyDot)
-        } else if session.isUnread {
-            statusBadge("NEW", tint: FoxTheme.accent)
         } else {
             statusBadge("Ready", tint: FoxTheme.readyGreen)
         }
