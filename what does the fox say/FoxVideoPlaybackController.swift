@@ -36,12 +36,13 @@ final class VideoPlaybackController: ObservableObject {
     func playLoop(_ asset: VideoAsset) {
         debugLog("video playLoop \(asset.rawValue)")
         let url = asset.url
-        let isAlreadyRequested = requestedLoopAsset == asset
-        let isAlreadyActive =
+        let isAlreadyStableLoop =
+            currentLoopURL == url &&
             activeLoopAsset == asset &&
             activePlayer.currentItem != nil &&
-            activePlayer.timeControlStatus != .paused
-        if isAlreadyRequested && (isTransitioningLoop || isAlreadyActive) {
+            activePlayer.timeControlStatus != .paused &&
+            !isTransitioningLoop
+        if isAlreadyStableLoop {
             return
         }
         requestedLoopAsset = asset
@@ -104,17 +105,16 @@ final class VideoPlaybackController: ObservableObject {
     func playOnceThenLoop(_ once: VideoAsset, loop: VideoAsset, onLoopStart: (() -> Void)? = nil) {
         debugLog("video playOnceThenLoop \(once.rawValue) -> \(loop.rawValue)")
         let onceURL = once.url
-        let loopURL = loop.url
-        if onceURL == loopURL {
+        if onceURL == loop.url {
             playLoop(loop)
             onLoopStart?()
             return
         }
 
-        currentLoopURL = loopURL
-        requestedLoopAsset = loop
+        currentLoopURL = nil
+        requestedLoopAsset = nil
         activeLoopAsset = nil
-        isTransitioningLoop = true
+        isTransitioningLoop = false
         clearObservers()
 
         let target = targetPlayerForNewPlayback()
@@ -130,6 +130,7 @@ final class VideoPlaybackController: ObservableObject {
             ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                debugLog("video playOnceThenLoop handoff -> \(loop.rawValue)")
                 self.playLoop(loop)
                 onLoopStart?()
             }
